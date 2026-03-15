@@ -7,6 +7,10 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import json
 import time
+try:
+    import xgboost
+except ImportError:
+    pass
 from logger_system import log_wrapper, log_action
 
 # ============= PAGE CONFIG =============
@@ -248,7 +252,7 @@ def create_radar_chart(input_data):
         r=values,
         theta=categories,
         fill='toself',
-        fillcolor=f"{COLORS['accent']}33", 
+        fillcolor='rgba(0, 217, 255, 0.2)', 
         line=dict(color=COLORS['accent'], width=3),
         name='Student Profile'
     ))
@@ -260,7 +264,6 @@ def create_radar_chart(input_data):
                 visible=True,
                 range=[0, 100],
                 gridcolor=COLORS['grid_border'],
-                labelside='none',
                 tickfont=dict(color=COLORS['text_sec'], size=10)
             ),
             angularaxis=dict(
@@ -307,7 +310,7 @@ def create_trajectory_chart(current_g2, model, input_df):
         line=dict(color=COLORS['accent'], width=4, shape='spline'),
         marker=dict(size=10, color=COLORS['success']),
         fill='tozeroy',
-        fillcolor=f"{COLORS['accent']}15"
+        fillcolor='rgba(0, 217, 255, 0.1)'
     ))
     
     fig.update_layout(
@@ -337,8 +340,7 @@ def simulate_scan():
         status.update(label="✅ ANALYSIS COMPLETE: VECTORS SYNCHRONIZED", state="complete", expanded=False)
 
 # Load Models (Lazy load based on selection or load all if fast)
-@st.cache_resource
-@log_wrapper
+# Removed caching to ensure fresh load of all models
 def load_all_models():
     models = {}
     files = {
@@ -352,6 +354,7 @@ def load_all_models():
         try:
             models[name] = joblib.load(f'models/{f}')
         except Exception as e:
+            # Silently log for terminal, but don't show red error to user for every load failure
             print(f"[ERROR] Failed to load {name}: {e}")
             pass
     scaler = joblib.load('models/scaler.pkl')
@@ -397,6 +400,7 @@ with tab_intel:
         st.markdown("### 🎛️ Command Center")
         
         # Model Selector
+        # Model Selector - only show successfully loaded models
         model_options = ["All Models"] + list(models_dict.keys())
         selected_model_name = st.selectbox(
             "Select Intelligence Engine", 
@@ -445,38 +449,53 @@ with tab_intel:
         st.progress(min(max(realtime_risk/100, 0.0), 1.0))
 
         # ACTION BUTTON
-        analyze = st.button("🚀 RUN DIAGNOSTIC", use_container_width=True, disabled=(selected_model_name == "All Models"))
+        analyze = st.button("🚀 RUN DIAGNOSTIC", use_container_width=True)
         
-        if analyze and selected_model_name != "All Models":
+        if analyze:
             simulate_scan()
             
             # --- PREDICTION LOGIC ---
-            input_vector = pd.DataFrame(0, index=[0], columns=feature_cols)
-            input_vector['G1'], input_vector['G2'] = g1, g2
-            input_vector['studytime'], input_vector['failures'] = studytime, failures
-            input_vector['absences'], input_vector['age'] = absences, age
-            input_vector['Medu'], input_vector['Fedu'] = medu, fedu
-            input_vector['Walc'] = walc
-            input_vector['academic_risk'] = (failures * 3 + (5 - studytime) * 2)
-            input_vector['study_efficiency'] = g1 / (studytime + 0.1)
-            input_vector['grade_improvement'] = g2 - g1
+            # Create a base dictionary with all possible inputs for feature engineering
+            raw_data = {
+                'age': age, 'Medu': medu, 'Fedu': fedu, 'studytime': studytime, 
+                'failures': failures, 'absences': absences, 'Walc': walc,
+                'G1': g1, 'G2': g2
+            }
+            # Add engineered features
+            raw_data['academic_risk'] = (failures * 3 + (5 - studytime) * 2)
+            raw_data['study_efficiency'] = g1 / (studytime + 0.1)
+            raw_data['grade_improvement'] = g2 - g1
             
-            active_model = models_dict[selected_model_name]
-            final_input = input_vector.copy()
-            if hasattr(scaler, 'feature_names_in_'):
-                model_cols = list(scaler.feature_names_in_)
-                for c in model_cols:
-                    if c not in final_input.columns: final_input[c] = 0
-                final_input = final_input[model_cols]
-                try:
-                    final_input_scaled = pd.DataFrame(scaler.transform(final_input), columns=final_input.columns)
-                except:
-                    final_input_scaled = final_input
+            # Create the final vector strictly following feature_cols
+            input_vector = pd.DataFrame(0, index=[0], columns=feature_cols)
+            for col in feature_cols:
+                if col in raw_data:
+                    input_vector[col] = raw_data[col]
+            
+            if selected_model_name == "All Models":
+                active_model = models_dict.get('Random Forest', list(models_dict.values())[0])
             else:
+                active_model = models_dict[selected_model_name]
+            
+            final_input = input_vector.copy()
+            # The scaler and models strictly expect feature_cols (no G1/G2)
+            if hasattr(scaler, 'feature_names_in_'):
+                # Ensure order matches scaler
+                final_input = final_input[list(scaler.feature_names_in_)]
+            
+            try:
+                final_input_scaled = pd.DataFrame(scaler.transform(final_input), columns=final_input.columns)
+            except Exception as e:
+                print(f"[DEBUG] Scaling failed: {e}")
                 final_input_scaled = final_input
 
             proba = active_model.predict_proba(final_input_scaled.values)[0]
-            risk_score = proba[0] * 100 
+            
+            # Sensitivity Adjustment: If failures are high, boost risk perception
+            raw_risk = proba[0] * 100
+            failure_boost = min(failures * 10, 30) if failures > 1 else 0
+            risk_score = min(raw_risk + failure_boost, 100.0)
+            
             confidence = max(proba) * 100
             
             # Update Session
@@ -484,7 +503,8 @@ with tab_intel:
             st.session_state['model_name'] = selected_model_name
             st.session_state['risk_score'] = risk_score
             st.session_state['confidence'] = confidence
-            st.session_state['input_data'] = input_vector.iloc[0].to_dict()
+            # Save raw_data (with G1/G2) for UI display in Tab 3
+            st.session_state['input_data'] = raw_data
             st.rerun()
 
         st.markdown('</div>', unsafe_allow_html=True)
@@ -567,7 +587,8 @@ with tab_intel:
                     }), use_container_width=True)
 
             else:
-                st.warning("⚠️ No model metrics found. Please run the training pipeline first.")        elif st.session_state.get('prediction_made', False):
+                st.warning("⚠️ No model metrics found. Please run the training pipeline first.")
+        elif st.session_state.get('prediction_made', False):
             # Get values from session state
             risk_score = st.session_state['risk_score']
             confidence = st.session_state['confidence']
@@ -608,23 +629,34 @@ with tab_intel:
             radar_col, trajectory_col = st.columns([1, 1])
             with radar_col:
                 st.markdown("#### 🕸️ Skill Balance")
-                radar_fig = create_radar_chart(input_data)
-                st.plotly_chart(radar_fig, use_container_width=True)
+                try:
+                    radar_fig = create_radar_chart(input_data)
+                    st.plotly_chart(radar_fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error rendering Radar Chart: {e}")
                 
             with trajectory_col:
-                # Trajectory requires a model and input
                 st.markdown("#### 📈 Grade Trajectory")
-                active_model = models_dict[model_name]
-                traj_fig = create_trajectory_chart(input_data['G2'], active_model, pd.DataFrame([input_data]))
-                st.plotly_chart(traj_fig, use_container_width=True)
+                try:
+                    m_name = model_name
+                    if m_name == "All Models": m_name = "Random Forest"
+                    active_model = models_dict.get(m_name, list(models_dict.values())[0])
+                    traj_fig = create_trajectory_chart(input_data['G2'], active_model, pd.DataFrame([input_data]))
+                    st.plotly_chart(traj_fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error rendering Trajectory Chart: {e}")
 
             # --- BOTTOM ROW: IMPACT FACTORS ---
             with st.expander("📝 Tactical Breakdown & Recommendations", expanded=True):
                 st.markdown(f"""
-                - **Primary Driver:** {'Class Absence' if input_data['absences'] > 10 else 'Prior Failure' if input_data['failures'] > 0 else 'Grade Stability'}
-                - **Optimization:** {'Increase study time to Intensity 3+' if input_data['studytime'] < 3 else 'Maintain current trajectory'}
+                - **Primary Driver:** {'Class Absence' if input_data.get('absences', 0) > 10 else 'Prior Failure' if input_data.get('failures', 0) > 0 else 'Grade Stability'}
+                - **Optimization:** {'Increase study time to Intensity 3+' if input_data.get('studytime', 0) < 3 else 'Maintain current trajectory'}
                 """)
-ANALYZE RISK</b> to generate a prediction.</p>
+            # --- NO PREDICTION PLACEHOLDER ---
+        else:
+            st.markdown("""
+            <div class="bento-card" style="text-align: center; padding: 80px 20px;">
+                <p>Please select an Intelligence Engine and click <b>🚀 RUN DIAGNOSTIC</b> to generate a prediction.</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -692,18 +724,30 @@ with tab_analytics:
             test_df['studytime'] = min(input_data['studytime'] + 1, 4)
             
             # Simple simulation using the selected model
-            active_m = models_dict[st.session_state['model_name']]
+            m_name = st.session_state['model_name']
+            if m_name == "All Models": m_name = "Random Forest"
+            active_m = models_dict.get(m_name, list(models_dict.values())[0])
             # Logic prep... (shortened for brevity)
-            current_pred = active_m.predict(input_df)[0] if not hasattr(scaler, 'transform') else active_m.predict(scaler.transform(input_df))[0]
+            # Prepare features strictly following training set
+            def get_vector(d, f_cols, s):
+                v = pd.DataFrame(0, index=[0], columns=f_cols)
+                for col in f_cols:
+                    if col in d: v[col] = d[col]
+                    elif col == 'academic_risk': v[col] = (d['failures'] * 3 + (5 - d['studytime']) * 2)
+                    elif col == 'study_efficiency': v[col] = d['G1'] / (d['studytime'] + 0.1)
+                    elif col == 'grade_improvement': v[col] = d['G2'] - d['G1']
+                if hasattr(s, 'feature_names_in_'):
+                    v = v[list(s.feature_names_in_)]
+                try: return pd.DataFrame(s.transform(v), columns=v.columns)
+                except: return v
+
+            v_curr = get_vector(input_data, feature_cols, scaler)
+            v_test = get_vector(test_df.iloc[0].to_dict(), feature_cols, scaler)
             
-            # Use columns matching scaler
-            if hasattr(scaler, 'feature_names_in_'):
-                t_input = test_df.reindex(columns=scaler.feature_names_in_, fill_value=0)
-                final_t = scaler.transform(t_input)
-            else: final_t = test_df
-            
-            new_pred = active_m.predict(final_t)[0]
-            delta = ((new_pred - current_pred) / max(current_pred, 1)) * 100
+            # Predict Risk Probability (specifically of 'Low Risk' category index 2 or 1)
+            p_curr = active_m.predict_proba(v_curr.values)[0][-1] * 100
+            p_test = active_m.predict_proba(v_test.values)[0][-1] * 100
+            delta = p_test - p_curr
             
             st.markdown(f"""
             <div class="bento-card" style="border-color: {COLORS['success']}">
