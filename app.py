@@ -256,7 +256,8 @@ with tab_collection:
     with col_f:
         st.markdown('<div class="bento-card">', unsafe_allow_html=True)
         st.markdown("#### 📁 File Upload")
-        uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"])
+        st.info("Upload CSV/Excel with exactly these columns: `previous_sem_cgpa`, `previous_to_previous_sem_cgpa`, `number_of_backlogs`, `attendance_percentage`, `studytime`, `goout`, `target` (0 or 1).")
+        uploaded_file = st.file_uploader("Contribute Data", type=["csv", "xlsx"])
         if uploaded_file:
             try:
                 if uploaded_file.name.endswith('.csv'): df_up = pd.read_csv(uploaded_file)

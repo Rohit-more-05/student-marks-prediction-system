@@ -1,6 +1,6 @@
 """
-Student Intelligence Platform — Retraining Pipeline
-Merges baseline data with new collected data and retrains the top model.
+Student Intelligence Platform — Retraining Pipeline (v2.2)
+Merges baseline data with new collected data and retrains ALL 9 models.
 """
 
 import pandas as pd
@@ -12,7 +12,14 @@ warnings.filterwarnings('ignore')
 
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import (RandomForestClassifier, GradientBoostingClassifier,
+                              AdaBoostClassifier)
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from xgboost import XGBClassifier
 from sklearn.metrics import accuracy_score
 
 # ===== PATHS =====
@@ -32,15 +39,13 @@ FEATURES = [
 ]
 
 def load_and_merge():
-    print("📊 Loading baseline data...")
-    # Load original datasets
+    print("Loading baseline data...")
     math_path = os.path.join(DATA_DIR, "student-mat.csv")
     por_path  = os.path.join(DATA_DIR, "student-por.csv")
     
     df_list = []
     if os.path.exists(math_path):
         m_df = pd.read_csv(math_path, sep=";")
-        # Map to our 6 features
         m_df["previous_sem_cgpa"] = m_df["G2"] / 2.0
         m_df["previous_to_previous_sem_cgpa"] = m_df["G1"] / 2.0
         m_df["number_of_backlogs"] = m_df["failures"]
@@ -59,12 +64,10 @@ def load_and_merge():
 
     baseline_df = pd.concat(df_list, ignore_index=True)
     
-    # Load collected data
     collected_path = os.path.join(DATA_DIR, "collected_data.csv")
     if os.path.exists(collected_path):
-        print("📥 Merging new collected data...")
+        print("Merging existing collected data...")
         collected_df = pd.read_csv(collected_path)
-        # Ensure 'target' column exists in collected data
         if "target" in collected_df.columns:
             combined_df = pd.concat([baseline_df, collected_df], ignore_index=True)
             return combined_df
@@ -73,40 +76,48 @@ def load_and_merge():
 
 def train():
     df = load_and_merge()
-    print(f"✅ Dataset ready: {len(df)} samples total.")
+    print(f"Dataset ready: {len(df)} samples total.")
+    X = df[FEATURES]; y = df["target"]
     
-    X = df[FEATURES]
-    y = df["target"]
-    
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
-    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     scaler = StandardScaler()
-    X_train_s = scaler.fit_transform(X_train)
-    X_test_s  = scaler.transform(X_test)
+    X_train_s = scaler.fit_transform(X_train); X_test_s = scaler.transform(X_test)
     
-    # We use Logistic Regression as the baseline 'best' but you can plug others
-    # In a real system, we might re-evaluate all 9 if needed.
-    print("🏋️ Retraining best model...")
-    model = LogisticRegression(max_iter=1000, random_state=42)
-    model.fit(X_train_s, y_train)
-    
-    y_pred = model.predict(X_test_s)
-    acc = accuracy_score(y_test, y_pred)
-    print(f"📈 New Accuracy: {acc*100:.2f}%")
-    
-    # Save artifacts
-    joblib.dump(model,   os.path.join(OUT_DIR, "best_model.pkl"))
-    joblib.dump(model,   os.path.join(OUT_DIR, "logistic_regression_model.pkl"))
-    joblib.dump(scaler,  os.path.join(OUT_DIR, "scaler.pkl"))
-    joblib.dump(FEATURES, os.path.join(OUT_DIR, "selected_features.pkl"))
-    
-    # Update comparison placeholder for the UI
-    results = [{"Model": "Logistic Regression", "Accuracy": acc}]
+    models = {
+        "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
+        "Naive Bayes":         GaussianNB(),
+        "SVM":                 SVC(kernel="rbf", probability=True, random_state=42),
+        "Decision Tree":       DecisionTreeClassifier(random_state=42),
+        "Random Forest":       RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1),
+        "Gradient Boosting":   GradientBoostingClassifier(n_estimators=100, random_state=42),
+        "XGBoost":             XGBClassifier(n_estimators=150, learning_rate=0.1, max_depth=4, random_state=42, verbosity=0),
+        "AdaBoost":            AdaBoostClassifier(n_estimators=100, random_state=42),
+        "KNN":                 KNeighborsClassifier(n_neighbors=5),
+    }
+
+    results = []; best_acc = 0; best_name = ""
+
+    print("Training 9 models...")
+    for name, model in models.items():
+        model.fit(X_train_s, y_train)
+        y_pred = model.predict(X_test_s)
+        acc = accuracy_score(y_test, y_pred)
+        cv = cross_val_score(model, X_train_s, y_train, cv=5)
+        
+        results.append({"Model": name, "Accuracy": acc, "CV_Mean": cv.mean()})
+        fname = f"{name.lower().replace(' ', '_')}_model.pkl"
+        joblib.dump(model, os.path.join(OUT_DIR, fname))
+        
+        if acc > best_acc:
+            best_acc = acc; best_name = name
+        print(f"  - {name}: {acc*100:.2f}%")
+
+    joblib.dump(models[best_name], os.path.join(OUT_DIR, "best_model.pkl"))
+    joblib.dump(scaler,            os.path.join(OUT_DIR, "scaler.pkl"))
+    joblib.dump(FEATURES,          os.path.join(OUT_DIR, "selected_features.pkl"))
     joblib.dump(pd.DataFrame(results), os.path.join(OUT_DIR, "model_comparison.pkl"))
     
-    print(f"🚀 Model updated in {OUT_DIR}")
+    print(f"Update complete. Best: {best_name} ({best_acc*100:.2f}%)")
 
 if __name__ == "__main__":
     train()
