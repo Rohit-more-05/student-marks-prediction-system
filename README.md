@@ -1,37 +1,90 @@
-# Student Intelligence Platform 🧠
+# 🧠 Student Intelligence Platform (v2.1)
 
-An advanced AI-driven academic diagnostic system designed to predict student performance and provide actionable intelligence. This platform serves as an **Academic Command Center**, bridging the gap between raw data and student success.
+A complete ML-powered system to predict student academic outcomes (**PASS/FAIL**) tailored for Indian college students.
 
-[![🚀 Launch App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://rohit-student-marks.streamlit.app/)
-
-## 🌟 High-Fidelity Features
-
-### 🔮 Intelligence Module
-A premium dashboard for real-time academic risk assessment. Monitors "Live Risk Sentiment" as you adjust student vectors, providing instant feedback on academic standing.
-
-### 🕸️ Competency Mapping (Radar Charts)
-Visualize the delicate balance between study habits, absences, and prior grades. Identify specific "Skill Gaps" before they impact final outcomes.
-
-### 📈 Grade Trajectory (What-If Analysis)
-Predictive modeling that plots the "Path to Excellence." See exactly how increasing study intensity by 20% impacts predicted final grades.
-
-### 📊 Analytics Suite
-- **Model Consensus**: Get a combined perspective from 5 different ML algorithms (Random Forest, XGBoost, etc.).
-- **Sensitivity Tuning**: Actionable intelligence on which levers (Absences vs Study Time) provide the highest return on student effort.
-
-## 🛠️ Technology Stack
-
-- **Frontend**: Streamlit (Python) with Modular Bento-box CSS
-- **Visualization**: Plotly Interactive Graphics
-- **Core Intelligence**: Scikit-Learn (Random Forest, SVM, Regressions)
-- **Data Engineering**: Vectorized pipeline with standardized scaling
-- **Automation**: GitHub Actions Keep-Alive Workflow
-
-## 🚀 Deployment & Integrity
-
-The platform is designed for **continuous availability**. 
-- **GitHub Action**: `Keep Streamlit App Alive` runs every 15 minutes to prevent instance sleeping.
-- **Fail-Safe Inference**: Adaptive model loading ensures the platform remains functional even if specific libraries are missing in local environments.
+👉 **Live App**: [rohit-student-marks.streamlit.app](https://rohit-student-marks.streamlit.app/)
 
 ---
-*Developed as a premium EdTech SaaS solution for modern academia.*
+
+## 🚀 Overview
+This system uses a streamlined **6-feature** pipeline and a comparison suite of **9 Machine Learning models** to provide highly accurate predictions. It features a full ML lifecycle, including real-time predictions, data collection via file uploads/Google Forms, and a manual retraining pipeline.
+
+### 🎯 Key Features
+- **Smart Prediction**: Real-time Pass/Fail analysis with confidence scoring.
+- **Dynamic Inputs**: Adapts to your current semester (Sem 2–8).
+- **Consensus Voting**: Aggregates predictions from 9 different algorithms for maximum reliability.
+- **Data Collection**: Integrated file upload (.csv, .xlsx) for appending new student records.
+- **Retraining Pipeline**: One-click manual retraining to update models with new data.
+
+---
+
+## 📊 ML Model Suite
+The system evaluates student performance using:
+1. Logistic Regression
+2. Naive Bayes
+3. SVM
+4. Decision Tree
+5. Random Forest
+6. Gradient Boosting
+7. XGBoost
+8. AdaBoost
+9. KNN
+
+---
+
+## 🛠️ Local Installation
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/Rohit-more-05/student-marks-prediction-system.git
+   cd student-marks-prediction-system
+   ```
+
+2. **Setup virtual environment**:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Windows: .venv\Scripts\activate
+   ```
+
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Run the Dashboard**:
+   ```bash
+   streamlit run app.py
+   ```
+
+---
+
+## 🔁 Data Collection & Retraining
+
+### 📥 Collecting New Data
+- **Via App**: Use the **"📥 DATA COLLECTION"** tab in the Streamlit app to upload student records.
+- **Format**: Uploaded files must contain the following columns:
+  - `previous_sem_cgpa`, `previous_to_previous_sem_cgpa`, `number_of_backlogs`, `attendance_percentage`, `studytime`, `goout`, `target` (1 for Pass, 0 for Fail).
+
+### ⚙️ Retraining
+Manual retraining can be triggered from the **"🔁 RETRAINING"** tab or via terminal:
+```bash
+python train_model.py
+```
+This script will merge the original baseline data with any new data in `data/collected_data.csv` and save the updated models to `outputs/`.
+
+---
+
+## 📂 Project Structure
+```
+├── app.py                # Main Streamlit Dashboard
+├── train_model.py        # Retraining Pipeline
+├── predict.py            # Terminal Prediction Helper
+├── notebooks/            # Original Experiment Notebooks
+├── data/                 # Baseline & Collected Datasets
+│   ├── student-mat.csv
+│   └── student-por.csv
+└── outputs/              # Saved Models & Scalers
+```
+
+---
+**Developed by Rohit More**
