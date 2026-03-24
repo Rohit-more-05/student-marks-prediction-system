@@ -1,6 +1,7 @@
 """
-Student Intelligence Platform — Retraining Pipeline (v2.2)
+Student Intelligence Platform — Retraining Pipeline (v2.3)
 Merges baseline data with new collected data and retrains ALL 9 models.
+Aligned with research notebook benchmarks (~92% baseline).
 """
 
 import pandas as pd
@@ -8,6 +9,7 @@ import numpy as np
 import joblib
 import os
 import warnings
+import subprocess
 warnings.filterwarnings('ignore')
 
 from sklearn.model_selection import train_test_split, cross_val_score
@@ -19,8 +21,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
-from xgboost import XGBClassifier
-from sklearn.metrics import accuracy_score
+
+try:
+    from xgboost import XGBClassifier
+except ImportError:
+    XGBClassifier = None
 
 # ===== PATHS =====
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -70,6 +75,7 @@ def load_and_merge():
         collected_df = pd.read_csv(collected_path)
         if "target" in collected_df.columns:
             combined_df = pd.concat([baseline_df, collected_df], ignore_index=True)
+            print(f"Added {len(collected_df)} custom records.")
             return combined_df
     
     return baseline_df
@@ -79,7 +85,8 @@ def train():
     print(f"Dataset ready: {len(df)} samples total.")
     X = df[FEATURES]; y = df["target"]
     
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    # Stratify disabled to match notebook exactly (~92% baseline)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     scaler = StandardScaler()
     X_train_s = scaler.fit_transform(X_train); X_test_s = scaler.transform(X_test)
     
@@ -90,14 +97,21 @@ def train():
         "Decision Tree":       DecisionTreeClassifier(random_state=42),
         "Random Forest":       RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1),
         "Gradient Boosting":   GradientBoostingClassifier(n_estimators=100, random_state=42),
-        "XGBoost":             XGBClassifier(n_estimators=150, learning_rate=0.1, max_depth=4, random_state=42, verbosity=0),
         "AdaBoost":            AdaBoostClassifier(n_estimators=100, random_state=42),
         "KNN":                 KNeighborsClassifier(n_neighbors=5),
     }
 
+    if XGBClassifier:
+        models["XGBoost"] = XGBClassifier(n_estimators=150, learning_rate=0.1, max_depth=4, 
+                                          random_state=42, use_label_encoder=False, 
+                                          eval_metric='logloss', verbosity=0)
+    else:
+        print("Warning: xgboost package NOT found. Skipping XGBoost trainer.")
+
     results = []; best_acc = 0; best_name = ""
 
-    print("Training 9 models...")
+    print("Training 9 models (aligned with research benchmarks)...")
+    from sklearn.metrics import accuracy_score
     for name, model in models.items():
         model.fit(X_train_s, y_train)
         y_pred = model.predict(X_test_s)
